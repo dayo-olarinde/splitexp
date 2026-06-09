@@ -1,4 +1,4 @@
-import { type Request } from "express";
+import type { Request } from "express";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { ApiResponse } from "../utils/api-response";
 
@@ -23,7 +23,7 @@ export const createLimiter = ({
         const key = keyGenerator(req);
         if (key) return key;
       }
-      return ipKeyGenerator(req);
+      return ipKeyGenerator(req as any);
     },
     handler: (req, res) => {
       res
@@ -48,7 +48,7 @@ export const globalApiLimiter = createLimiter({
 
 // 2. Financial Operation Limiter (Mount on POST /expenses and POST /settlements)
 export const financialTransactionLimiter = createLimiter({
-  keyGenerator: (req) => req.user?.id || ipKeyGenerator(req),
+  keyGenerator: (req) => req.user?.id || ipKeyGenerator(req as any),
   max: 15,
   windowMinutes: 1,
   message: "You are logging transactions too quickly. Please wait a minute.",
@@ -56,7 +56,7 @@ export const financialTransactionLimiter = createLimiter({
 
 // 3. Group Creation Limiter (Mount on POST /groups)
 export const createGroupLimiter = createLimiter({
-  keyGenerator: (req) => req.user?.id || ipKeyGenerator(req),
+  keyGenerator: (req) => req.user?.id || ipKeyGenerator(req as any),
   max: 10,
   windowMinutes: 60,
   message: "You have reached the limit for creating new groups for now.",

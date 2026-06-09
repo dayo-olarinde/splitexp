@@ -6,6 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { groupMembers } from "../db/schema";
 import { db } from "../config/db";
 import { asyncHandler } from "../utils/async-handler";
+import { verifyGroup } from "../services/group.service";
 
 export const authenticate = async (
   req: Request,
@@ -62,6 +63,39 @@ export const requireGroupAdmin = asyncHandler(
         new ApiError(403, "You must be a group admin to perform this action."),
       );
     }
+
+    next();
+  },
+);
+
+export const requireGroupMember = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const userId = req.user!.id;
+    const { groupId } = req.params as { groupId: string };
+
+    if (!groupId) {
+      return next(
+        new ApiError(400, "Group ID is required to check permissions."),
+      );
+    }
+
+    await verifyGroup(groupId);
+
+    const [member] = await db
+      .select()
+      .from(groupMembers)
+      .where(
+        and(
+          eq(groupMembers.groupId, groupId as string),
+          eq(groupMembers.userId, userId),
+        ),
+      );
+
+    if (!member) {
+      return next(new ApiError(404, "You are not a member of this group."));
+    }
+
+    req.member = member;
 
     next();
   },

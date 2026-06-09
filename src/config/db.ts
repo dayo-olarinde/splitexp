@@ -18,6 +18,8 @@ export const db = drizzle(queryClient, {
   logger: env.NODE_ENV === "development",
 });
 
+export const pg = queryClient;
+
 export const closeDb = async () => {
   logger.info("Closing database connection...");
   await queryClient.end();

@@ -1,8 +1,9 @@
 import { and, eq, sql } from "drizzle-orm";
-import { db } from "../config/db";
+import { db, pg } from "../config/db";
 import { groupMembers, groups, user } from "../db/schema";
 import { ApiError } from "../utils/api-response";
 import type { UpdateGroupSchema } from "../validations/group.validation";
+import { toCents, toDecimal } from "../utils/expenseCalc";
 
 export const createGroupInDb = async (
   userId: string,
@@ -50,7 +51,7 @@ export const getAllUserGroups = async (userId: string) => {
 };
 
 export const getAllUserGroupss = async (userId: string) => {
-  const result = await db.execute(sql`
+  const result = await pg`
     SELECT
       g.id,
       g.name,
@@ -65,7 +66,7 @@ export const getAllUserGroupss = async (userId: string) => {
       ON g.id = all_members.group_id
     GROUP BY g.id, g.name, g.description, gm.role, gm.created_at
     ORDER BY gm.created_at DESC
-  `);
+  `;
 
   return result;
 };
@@ -73,7 +74,7 @@ export const getAllUserGroupss = async (userId: string) => {
 export const getGroupDetails = async (groupId: string) => {
   const group = await verifyGroup(groupId);
 
-  const members = await db.execute(sql`
+  const members = await pg`
     SELECT
       gm.user_id,
       gm.role,
@@ -84,7 +85,7 @@ export const getGroupDetails = async (groupId: string) => {
     INNER JOIN "user" u 
       ON gm.user_id = u.id
     WHERE gm.group_id = ${groupId}
-    `);
+    `;
 
   return { ...group, members: members };
 };
@@ -222,12 +223,12 @@ export const leaveTheGroup = async (groupId: string, userId: string) => {
   if (!member) throw new ApiError(404, "You are not a member of this group");
 
   if (member?.role === "admin") {
-    const adminCount = await db.execute(sql`
+    const adminCount = await pg`
       SELECT
         COALESCE(COUNT(gm.id), 0) AS count
       FROM group_members gm
       WHERE gm.group_id = ${groupId} AND gm.role = 'admin'
-      `);
+      `;
 
     if (Number(adminCount[0]?.count) <= 1) {
       throw new ApiError(
@@ -235,6 +236,15 @@ export const leaveTheGroup = async (groupId: string, userId: string) => {
         "You are the last admin. Promote another member or delete the group.",
       );
     }
+  }
+
+  const balance = await calcUserTotalGroupBalance(userId, groupId);
+
+  if (Number(balance) !== 0) {
+    throw new ApiError(
+      400,
+      `Cannot leave the group. You have an outstanding balance of ${toDecimal(Math.abs(toCents(balance)))}. Please settle all debts first.`,
+    );
   }
 
   await db
@@ -247,7 +257,7 @@ export const leaveTheGroup = async (groupId: string, userId: string) => {
   return;
 };
 
-const verifyGroup = async (groupId: string) => {
+export const verifyGroup = async (groupId: string) => {
   const [group] = await db
     .select({
       id: groups.id,
@@ -262,4 +272,50 @@ const verifyGroup = async (groupId: string) => {
   if (!group) throw new ApiError(404, "Group does not exist");
 
   return group;
+};
+
+export const calcUserTotalGroupBalance = async (
+  userId: string,
+  groupId: string,
+) => {
+  const [balance] = await pg`
+    WITH 
+    expenses_paid AS (
+      SELECT COALESCE(SUM(es.share_amount), 0) AS amount
+      FROM expense_shares es
+      JOIN expenses e ON e.id = es.expense_id
+      WHERE e.group_id = ${groupId}
+        AND e.payer_id = ${userId}
+        ), 
+    amounts_owed AS (
+      SELECT COALESCE(SUM(es.share_amount), 0) AS amount
+      FROM expense_shares es
+      JOIN expenses e ON e.id = es.expense_id
+      WHERE e.group_id = ${groupId}
+        AND es.user_id = ${userId}
+        ), 
+    settlements_paid AS (
+      SELECT COALESCE(SUM(amount), 0) AS amount
+      FROM settlements
+      WHERE group_id = ${groupId}
+        AND payer_id = ${userId}
+        AND status = 'confirmed'
+        ),
+    settlements_received AS (
+      SELECT COALESCE(SUM(amount), 0) AS amount
+      FROM settlements
+      WHERE group_id = ${groupId}
+        AND payee_id = ${userId}
+        AND status = 'confirmed'
+        )
+
+    SELECT (ep.amount - sr.amount) - (ao.amount - sp.amount) as net_balance
+    FROM 
+      expenses_paid ep, 
+      amounts_owed ao, 
+      settlements_paid sp, 
+      settlements_received sr
+      `;
+
+  return balance?.net_balance;
 };
