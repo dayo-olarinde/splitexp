@@ -1,9 +1,9 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, pg } from "../config/db";
 import { groupMembers, groups, user } from "../db/schema";
 import { ApiError } from "../utils/api-response";
+import { toCents, toDecimal } from "../utils/calculations";
 import type { UpdateGroupSchema } from "../validations/group.validation";
-import { toCents, toDecimal } from "../utils/expenseCalc";
 
 export const createGroupInDb = async (
   userId: string,
@@ -238,12 +238,22 @@ export const leaveTheGroup = async (groupId: string, userId: string) => {
     }
   }
 
-  const balance = await calcUserTotalGroupBalance(userId, groupId);
+  const [balance] = await pg`
+      SELECT 
+        COALESCE(SUM(le.amount)::int, 0) AS net_balance 
+      FROM ledger_entries le
+      JOIN transactions t ON t.id = le.transaction_id
+      WHERE le.group_id = ${groupId}
+        AND le.user_id = ${userId}
+        AND t.status = 'confirmed' 
+    `;
 
-  if (Number(balance) !== 0) {
+  const netBalance = balance?.net_balance ?? 0;
+
+  if (netBalance !== 0) {
     throw new ApiError(
       400,
-      `Cannot leave the group. You have an outstanding balance of ${toDecimal(Math.abs(toCents(balance)))}. Please settle all debts first.`,
+      `Cannot leave the group. You have an outstanding balance of ${toDecimal(Math.abs(netBalance))}. Please settle all debts first.`,
     );
   }
 
@@ -272,50 +282,4 @@ export const verifyGroup = async (groupId: string) => {
   if (!group) throw new ApiError(404, "Group does not exist");
 
   return group;
-};
-
-export const calcUserTotalGroupBalance = async (
-  userId: string,
-  groupId: string,
-) => {
-  const [balance] = await pg`
-    WITH 
-    expenses_paid AS (
-      SELECT COALESCE(SUM(es.share_amount), 0) AS amount
-      FROM expense_shares es
-      JOIN expenses e ON e.id = es.expense_id
-      WHERE e.group_id = ${groupId}
-        AND e.payer_id = ${userId}
-        ), 
-    amounts_owed AS (
-      SELECT COALESCE(SUM(es.share_amount), 0) AS amount
-      FROM expense_shares es
-      JOIN expenses e ON e.id = es.expense_id
-      WHERE e.group_id = ${groupId}
-        AND es.user_id = ${userId}
-        ), 
-    settlements_paid AS (
-      SELECT COALESCE(SUM(amount), 0) AS amount
-      FROM settlements
-      WHERE group_id = ${groupId}
-        AND payer_id = ${userId}
-        AND status = 'confirmed'
-        ),
-    settlements_received AS (
-      SELECT COALESCE(SUM(amount), 0) AS amount
-      FROM settlements
-      WHERE group_id = ${groupId}
-        AND payee_id = ${userId}
-        AND status = 'confirmed'
-        )
-
-    SELECT (ep.amount - sr.amount) - (ao.amount - sp.amount) as net_balance
-    FROM 
-      expenses_paid ep, 
-      amounts_owed ao, 
-      settlements_paid sp, 
-      settlements_received sr
-      `;
-
-  return balance?.net_balance;
 };

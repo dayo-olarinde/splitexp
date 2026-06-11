@@ -1,5 +1,10 @@
 import { Router } from "express";
-import { createSettlement } from "../controllers/settlement.controller";
+import {
+  confirmSettlement,
+  createSettlement,
+  // getSettlement,
+  // listSettlements,
+} from "../controllers/settlement.controller";
 import {
   authenticate,
   requireGroupMember,
@@ -21,5 +26,29 @@ router.post(
   validateInput(createSettlementSchema),
   createSettlement,
 );
+
+// router.get(
+//   "/settlements",
+//   authenticate,
+//   validateUrlParams(urlParamsSchema),
+//   requireGroupMember,
+//   listSettlements,
+// );
+
+router.patch(
+  "/settlements/:transactionId/confirm",
+  authenticate,
+  validateUrlParams(urlParamsSchema),
+  requireGroupMember,
+  confirmSettlement,
+);
+
+// router.get(
+//   "/settlements/:settlementId",
+//   authenticate,
+//   validateUrlParams(urlParamsSchema),
+//   requireGroupMember,
+//   getSettlement,
+// );
 
 export default router;

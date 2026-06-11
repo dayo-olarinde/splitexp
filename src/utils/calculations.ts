@@ -1,3 +1,4 @@
+import { pg } from "../config/db";
 import { ApiError } from "./api-response";
 
 interface ParticipantInput {
@@ -8,7 +9,7 @@ interface ParticipantInput {
 
 interface CalculatedShare {
   userId: string;
-  shareAmount: string;
+  shareAmount: number;
 }
 
 export const toCents = (amount: string): number =>
@@ -52,7 +53,7 @@ const calcEqualShares = (
 
   return participants.map((p, i) => ({
     userId: p.userId,
-    shareAmount: toDecimal(shareCents + (i === 0 ? remaindercents : 0)),
+    shareAmount: shareCents + (i === 0 ? remaindercents : 0),
   }));
 };
 
@@ -78,7 +79,7 @@ const calcExactShares = (
 
   return shareCents.map((s) => ({
     userId: s.userId,
-    shareAmount: toDecimal(s.shareAmountCents!),
+    shareAmount: s.shareAmountCents!,
   }));
 };
 
@@ -111,6 +112,6 @@ const calcPercantageShares = (
 
   return shareCents.map((s, i) => ({
     userId: s.userId,
-    shareAmount: toDecimal(s.shareAmountCents + (i === 0 ? remainderCents : 0)),
+    shareAmount: s.shareAmountCents + (i === 0 ? remainderCents : 0),
   }));
 };

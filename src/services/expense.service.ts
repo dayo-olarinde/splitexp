@@ -1,10 +1,13 @@
 import { and, eq } from "drizzle-orm";
 import { db, pg } from "../config/db";
 import { ApiError } from "../utils/api-response";
-import { validateAndCalcShares } from "../utils/expenseCalc";
+import {
+  toCents,
+  toDecimal,
+  validateAndCalcShares,
+} from "../utils/calculations";
 import type { CreateExpenseInput } from "../validations/expense.validation";
-import { verifyGroup } from "./group.service";
-import { expenses } from "../db/schema";
+import { logger } from "../config/logger";
 
 export const logExpense = async (groupId: string, data: CreateExpenseInput) => {
   const uniqueUserIds = Array.from(
@@ -34,133 +37,156 @@ export const logExpense = async (groupId: string, data: CreateExpenseInput) => {
     data.participants,
   );
 
-  const expense = await pg.begin(async (tx) => {
-    const [newExpense] = await tx`
-      INSERT INTO expenses (group_id, payer_id, total_amount, split_type, category, description)
+  const totalAmountCents = toCents(data.totalAmount);
+
+  const transaction = await pg.begin(async (tx) => {
+    const [newTx] = await tx`
+      INSERT INTO transactions (group_id, type, split_type, payer_id, total_amount, description)
       VALUES (
         ${groupId},
-        ${data.payerId},
-        ${data.totalAmount},
+        'expense',
         ${data.splitType},
-        ${data.category ?? null},
+        ${data.payerId},
+        ${toCents(data.totalAmount)},
         ${data.description}
       )
       RETURNING *
       `;
 
-    if (!newExpense) throw new ApiError(500, "Failed to create expense");
+    if (!newTx) throw new ApiError(500, "Failed to create transaction");
 
-    const shareValues = shares.map((s) => ({
-      expense_id: newExpense.id,
-      user_id: s.userId,
-      share_amount: s.shareAmount,
-    }));
-
-    await tx`
-    INSERT INTO expense_shares ${tx(shareValues, "expense_id", "user_id", "share_amount")}
-    `;
-
-    return newExpense;
-  });
-
-  return expense;
-};
-
-export const listGroupExpenses = async (
-  groupId: string,
-  cursor?: string,
-  limit: number = 10,
-) => {
-  const expenses = (await pg`
-    SELECT 
-      exp.id,
-      exp.group_id,
-      exp.total_amount,
-      exp.split_type,
-      exp.category,
-      exp.description,
-      exp.created_at,
-      u.name AS payer_name
-    FROM expenses exp
-    INNER JOIN "user" u
-      On exp.payer_id = u.id
-    WHERE exp.group_id = ${groupId}
-    ${cursor ? pg`AND exp.created_at < ${cursor}::timestamptz` : pg``}
-    ORDER BY exp.created_at DESC
-    LIMIT ${limit + 1}
-    `) as unknown as any[];
-
-  const hasMore = expenses.length > limit;
-  if (hasMore) expenses.pop();
-
-  const nextCursor = hasMore ? expenses[expenses.length - 1].created_at : null;
-
-  return {
-    data: expenses,
-    pagination: {
-      hasMore,
-      nextCursor,
-      count: expenses.length,
-    },
-  };
-};
-
-export const getExpenseDetails = async (groupId: string, expenseId: string) => {
-  const expense = await db.query.expenses.findFirst({
-    where: and(eq(expenses.id, expenseId), eq(expenses.groupId, groupId)),
-    with: {
-      payer: {
-        columns: { id: true, name: true, email: true },
+    const ledgerRows = [
+      {
+        transaction_id: newTx.id,
+        group_id: groupId,
+        user_id: data.payerId,
+        amount: totalAmountCents,
       },
-      shares: {
-        with: {
-          participant: {
-            columns: { id: true, name: true, email: true },
-          },
-        },
-      },
-    },
-  });
+    ];
 
-  if (!expense) {
-    throw new ApiError(404, "Expense not found in this group");
-  }
-
-  return expense;
-};
-
-export const deleteExpenseById = async (
-  userId: string,
-  role: string,
-  groupId: string,
-  expenseId: string,
-) => {
-  const [targetExpense] = await pg`
-    SELECT payer_id
-    FROM expenses
-    WHERE id = ${expenseId}
-      AND group_id = ${groupId}
-  `;
-
-  if (!targetExpense) throw new ApiError(404, "Expense not found");
-
-  if (targetExpense.payer_id !== userId && role !== "admin")
-    throw new ApiError(
-      403,
-      "Only the payer or an admin can delete this expense",
+    shares.map((s) =>
+      ledgerRows.push({
+        transaction_id: newTx.id,
+        group_id: groupId,
+        user_id: s.userId,
+        amount: -Math.abs(s.shareAmount),
+      }),
     );
 
-  await pg.begin(async (tx) => {
     await tx`
-    DELETE FROM expense_shares
-    WHERE expense_id = ${expenseId}
-  `;
+    INSERT INTO ledger_entries
+      ${tx(ledgerRows, "transaction_id", "group_id", "user_id", "amount")}
+    `;
 
-    await tx`
-    DELETE FROM expenses
-    WHERE id = ${expenseId}
-  `;
+    const netSum = ledgerRows.reduce((sum, row) => sum + row.amount, 0);
+    if (netSum !== 0) {
+      throw new ApiError(
+        500,
+        "CRITICAL ERROR: Ledger does not balance. Transaction aborted.",
+      );
+    }
 
-    return { deletedId: expenseId };
+    return { ...newTx, total_amount: toDecimal(newTx.total_amount) };
   });
+
+  return transaction;
 };
+
+// export const listGroupExpenses = async (
+//   groupId: string,
+//   cursor?: string,
+//   limit: number = 10,
+// ) => {
+//   const expenses = (await pg`
+//     SELECT
+//       exp.id,
+//       exp.group_id,
+//       exp.total_amount,
+//       exp.split_type,
+//       exp.category,
+//       exp.description,
+//       exp.created_at,
+//       u.name AS payer_name
+//     FROM expenses exp
+//     INNER JOIN "user" u
+//       On exp.payer_id = u.id
+//     WHERE exp.group_id = ${groupId}
+//     ${cursor ? pg`AND exp.created_at < ${cursor}::timestamptz` : pg``}
+//     ORDER BY exp.created_at DESC
+//     LIMIT ${limit + 1}
+//     `) as unknown as any[];
+
+//   const hasMore = expenses.length > limit;
+//   if (hasMore) expenses.pop();
+
+//   const nextCursor = hasMore ? expenses[expenses.length - 1].created_at : null;
+
+//   return {
+//     data: expenses,
+//     pagination: {
+//       hasMore,
+//       nextCursor,
+//       count: expenses.length,
+//     },
+//   };
+// };
+
+// export const getExpenseDetails = async (groupId: string, expenseId: string) => {
+//   const expense = await db.query.expenses.findFirst({
+//     where: and(eq(expenses.id, expenseId), eq(expenses.groupId, groupId)),
+//     with: {
+//       payer: {
+//         columns: { id: true, name: true, email: true },
+//       },
+//       shares: {
+//         with: {
+//           participant: {
+//             columns: { id: true, name: true, email: true },
+//           },
+//         },
+//       },
+//     },
+//   });
+
+//   if (!expense) {
+//     throw new ApiError(404, "Expense not found in this group");
+//   }
+
+//   return expense;
+// };
+
+// export const deleteExpenseById = async (
+//   userId: string,
+//   role: string,
+//   groupId: string,
+//   expenseId: string,
+// ) => {
+//   const [targetExpense] = await pg`
+//     SELECT payer_id
+//     FROM expenses
+//     WHERE id = ${expenseId}
+//       AND group_id = ${groupId}
+//   `;
+
+//   if (!targetExpense) throw new ApiError(404, "Expense not found");
+
+//   if (targetExpense.payer_id !== userId && role !== "admin")
+//     throw new ApiError(
+//       403,
+//       "Only the payer or an admin can delete this expense",
+//     );
+
+//   await pg.begin(async (tx) => {
+//     await tx`
+//     DELETE FROM expense_shares
+//     WHERE expense_id = ${expenseId}
+//   `;
+
+//     await tx`
+//     DELETE FROM expenses
+//     WHERE id = ${expenseId}
+//   `;
+
+//     return { deletedId: expenseId };
+//   });
+// };

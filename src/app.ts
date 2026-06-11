@@ -18,6 +18,7 @@ import { auth } from "./config/auth";
 import groupRoutes from "./routes/group.routes";
 import expenseRoutes from "./routes/expense.routes";
 import settlementRoutes from "./routes/settlement.route";
+import balanceRoutes from "./routes/balances.routes";
 
 export const app = express();
 
@@ -59,6 +60,7 @@ app.all("/api/auth/*", toNodeHandler(auth));
 app.use("/api/v1/groups", groupRoutes);
 app.use("/api/v1/groups/:groupId", expenseRoutes);
 app.use("/api/v1/groups/:groupId", settlementRoutes);
+app.use("/api/v1/groups/:groupId", balanceRoutes);
 
 app.use(notFoundError);
 app.use(globalErrorHandler);

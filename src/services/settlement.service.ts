@@ -1,6 +1,9 @@
-import { pg } from "../config/db";
+// import { and, desc, eq, or } from "drizzle-orm";
+import { db, pg } from "../config/db";
+import { logger } from "../config/logger";
+// import { settlements } from "../db/schema";
 import { ApiError } from "../utils/api-response";
-import { toCents, toDecimal } from "../utils/expenseCalc";
+import { toCents, toDecimal } from "../utils/calculations";
 import type { CreateSettlementInput } from "../validations/settlement.validation";
 
 export const logSettlement = async (
@@ -15,12 +18,12 @@ export const logSettlement = async (
 
   const settlement = await pg.begin(async (tx) => {
     const members = await tx`
-        SELECT user_id
-        FROM group_members
-        WHERE group_id = ${groupId}
-            AND user_id IN (${data.payeeId}, ${payerId})
-        FOR UPDATE
-        `;
+      SELECT user_id
+      FROM group_members
+      WHERE group_id = ${groupId}
+        AND user_id IN (${data.payeeId}, ${payerId})
+      FOR UPDATE
+      `;
 
     if (members.length !== 2)
       throw new ApiError(
@@ -30,10 +33,13 @@ export const logSettlement = async (
 
     const [pendingSettlement] = await tx`
       SELECT id
-      FROM settlements
-      WHERE group_id = ${groupId} 
-        AND payee_id = ${data.payeeId} 
+      FROM transactions 
+      WHERE group_id = ${groupId}
+        AND type = 'settlement'
+        AND status = 'pending'
         AND payer_id = ${payerId}
+        AND payee_id = ${data.payeeId}
+      LIMIT 1
       `;
 
     if (pendingSettlement)
@@ -42,48 +48,143 @@ export const logSettlement = async (
         "You already have a pending settlement with this user. Wait for them to confirm it.",
       );
 
-    const [balance] = await tx`
-        WITH debt AS (
-            SELECT COALESCE(SUM(es.share_amount), 0) AS amount
-            FROM expense_shares es
-            JOIN expenses e
-                ON e.id = es.expense_id
-            WHERE e.group_id = ${groupId}
-                AND e.payer_id = ${data.payeeId}
-                AND es.user_id = ${payerId}
-        ), 
-        settlement AS (
-            SELECT COALESCE(SUM(amount), 0) AS amount
-            FROM settlements
-            WHERE group_id = ${groupId}
-                    AND payer_id = ${payerId}
-                AND payee_id = ${data.payeeId}
-                AND status = 'confirmed'
-        )
-
-        SELECT (d.amount -s.amount) as net_owed
-        FROM debt d, settlement s
-      `;
-
-    const netOwed = toCents(balance?.net_owed);
-
-    if (Number(netOwed) <= 0)
-      throw new ApiError(400, "You do not owe this user any money.");
-
-    if (amountCents > netOwed)
-      throw new ApiError(
-        400,
-        `You cannot overpay. You only owe ${toDecimal(netOwed)}.`,
-      );
-
-    const [newSettlement] = await tx`
-      INSERT INTO settlements (group_id, payer_id, payee_id, amount, status)
-      VALUES (${groupId}, ${payerId}, ${data.payeeId}, ${data.amount}, 'pending')
+    const [newTx] = await tx`
+      INSERT INTO transactions (group_id, type, status, payer_id, payee_id, total_amount, description)
+      VALUES (
+        ${groupId}, 
+        'settlement',
+        'pending',
+        ${payerId}, 
+        ${data.payeeId}, 
+        ${amountCents}, 
+        ${data.description}
+      )
       RETURNING *
       `;
 
-    return newSettlement;
+    if (!newTx) throw new ApiError(500, "Error creating new Transaction");
+
+    const ledgerEntry = [
+      {
+        transaction_id: newTx.id,
+        group_id: groupId,
+        user_id: payerId,
+        amount: amountCents,
+      },
+      {
+        transaction_id: newTx.id,
+        group_id: groupId,
+        user_id: data.payeeId,
+        amount: -amountCents,
+      },
+    ];
+
+    await tx`
+      INSERT INTO ledger_entries ${tx(ledgerEntry, "transaction_id", "group_id", "user_id", "amount")}
+    `;
+
+    const netSum = ledgerEntry.reduce((sum, e) => sum + Number(e.amount), 0);
+    if (netSum !== 0)
+      throw new ApiError(500, "Ledger imbalance. Settlement aborted");
+
+    return newTx;
   });
 
   return settlement;
 };
+
+// export const listGroupSettlements = async (groupId: string) => {
+//   const allSettlements = await db.query.settlements.findMany({
+//     where: eq(settlements?.groupId, groupId),
+//     orderBy: [desc(settlements.createdAt)],
+//     with: {
+//       payer: {
+//         columns: { id: true, name: true, email: true },
+//       },
+//       payee: {
+//         columns: { id: true, name: true, email: true },
+//       },
+//     },
+//   });
+
+//   return allSettlements;
+// };
+
+export const updateTransactionStatus = async (
+  userId: string,
+  groupId: string,
+  transactionId: string,
+) => {
+  const confirmedTransaction = await pg.begin(async (tx) => {
+    const [transaction] = await tx`
+    SELECT id, status, type, payee_id
+    FROM transactions
+    WHERE id = ${transactionId} 
+      AND group_id= ${groupId}
+    FOR UPDATE
+    `;
+
+    if (!transaction) throw new ApiError(404, "Settlement not found");
+
+    if (transaction.type !== "settlement") {
+      throw new ApiError(
+        400,
+        "This transaction type cannot be confirmed manually",
+      );
+    }
+
+    if (transaction.status !== "pending")
+      throw new ApiError(
+        400,
+        `This settlement is already ${transaction.status}`,
+      );
+
+    if (transaction.payee_id !== userId)
+      throw new ApiError(
+        403,
+        "You are not authorised to confirm this settlement",
+      );
+
+    const [updatedTransaction] = await tx`
+      UPDATE transactions
+      SET status = 'confirmed'
+      WHERE id = ${transactionId}
+      RETURNING *
+    `;
+
+    return updatedTransaction;
+  });
+
+  return confirmedTransaction;
+};
+
+// export const getSettlementDetail = async (
+//   userId: string,
+//   groupId: string,
+//   settlementId: string,
+// ) => {
+//   const settlement = await db.query.settlements.findFirst({
+//     where: and(
+//       eq(settlements.groupId, groupId),
+//       eq(settlements.id, settlementId),
+//       or(eq(settlements.payerId, userId), eq(settlements.payeeId, userId)),
+//     ),
+//     with: {
+//       payer: {
+//         columns: { id: true, name: true, email: true },
+//       },
+//       payee: {
+//         columns: { id: true, name: true, email: true },
+//       },
+//     },
+//   });
+
+//   if (!settlement) {
+//     throw new ApiError(
+//       404,
+//       "Settlement not found or you are not authorized to view it",
+//     );
+//   }
+
+//   return settlement;
+// };

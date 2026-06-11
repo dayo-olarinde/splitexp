@@ -6,6 +6,7 @@ export const createSettlementSchema = z
     amount: z
       .string()
       .regex(/^\d+(\.\d{1,2})?$/, "Must be a valid amount (e.g., 120.00)"),
+    description: z.string().max(255),
   })
   .superRefine((data, ctx) => {
     if (Number(data.amount) <= 0) {
