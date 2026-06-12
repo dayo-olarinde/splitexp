@@ -93,44 +93,44 @@ export const logExpense = async (groupId: string, data: CreateExpenseInput) => {
   return transaction;
 };
 
-// export const listGroupExpenses = async (
-//   groupId: string,
-//   cursor?: string,
-//   limit: number = 10,
-// ) => {
-//   const expenses = (await pg`
-//     SELECT
-//       exp.id,
-//       exp.group_id,
-//       exp.total_amount,
-//       exp.split_type,
-//       exp.category,
-//       exp.description,
-//       exp.created_at,
-//       u.name AS payer_name
-//     FROM expenses exp
-//     INNER JOIN "user" u
-//       On exp.payer_id = u.id
-//     WHERE exp.group_id = ${groupId}
-//     ${cursor ? pg`AND exp.created_at < ${cursor}::timestamptz` : pg``}
-//     ORDER BY exp.created_at DESC
-//     LIMIT ${limit + 1}
-//     `) as unknown as any[];
+export const listGroupExpenses = async (
+  groupId: string,
+  cursor?: string,
+  limit: number = 10,
+) => {
+  const expenses = (await pg`
+    SELECT
+      exp.id,
+      exp.group_id,
+      exp.total_amount,
+      exp.split_type,
+      exp.category,
+      exp.description,
+      exp.created_at,
+      u.name AS payer_name
+    FROM expenses exp
+    INNER JOIN "user" u
+      ON exp.payer_id = u.id
+    WHERE exp.group_id = ${groupId}
+      ${cursor ? pg`AND exp.created_at < ${cursor}::timestamptz` : pg``}
+    ORDER BY exp.created_at DESC
+    LIMIT ${limit + 1}
+    `) as unknown as any[];
 
-//   const hasMore = expenses.length > limit;
-//   if (hasMore) expenses.pop();
+  const hasMore = expenses.length > limit;
+  if (hasMore) expenses.pop();
 
-//   const nextCursor = hasMore ? expenses[expenses.length - 1].created_at : null;
+  const nextCursor = hasMore ? expenses[expenses.length - 1].created_at : null;
 
-//   return {
-//     data: expenses,
-//     pagination: {
-//       hasMore,
-//       nextCursor,
-//       count: expenses.length,
-//     },
-//   };
-// };
+  return {
+    data: expenses,
+    pagination: {
+      hasMore,
+      nextCursor,
+      count: expenses.length,
+    },
+  };
+};
 
 // export const getExpenseDetails = async (groupId: string, expenseId: string) => {
 //   const expense = await db.query.expenses.findFirst({

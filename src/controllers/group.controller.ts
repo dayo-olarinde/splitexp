@@ -6,6 +6,7 @@ import {
   deleteGroupById,
   getAllUserGroups,
   getGroupDetails,
+  groupTransactions,
   leaveTheGroup,
   removeMemberById,
   updateGroupDetails,
@@ -106,3 +107,15 @@ export const leaveGroup = asyncHandler(async (req: Request, res: Response) => {
 
   res.json(new ApiResponse(200, "Left group successfully"));
 });
+
+export const getGroupTransactions = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { groupId } = req.params as { groupId: string };
+    const cursor = req.query.cursor as string | undefined;
+    const limit = parseInt(req.query.limit as string) || 10;
+
+    const transactions = await groupTransactions(groupId, limit, cursor);
+
+    res.json(new ApiResponse(200, "Group transactions fetched", transactions));
+  },
+);

@@ -6,11 +6,16 @@ import {
   deleteGroup,
   getGroupById,
   getGroups,
+  getGroupTransactions,
   leaveGroup,
   removeMember,
   updateGroup,
 } from "../controllers/group.controller";
-import { authenticate, requireGroupAdmin } from "../middleware/auth.middleware";
+import {
+  authenticate,
+  requireGroupAdmin,
+  requireGroupMember,
+} from "../middleware/auth.middleware";
 import { createGroupLimiter } from "../middleware/rate-limit.middleware";
 import {
   validateInput,
@@ -91,6 +96,14 @@ router.post(
   authenticate,
   validateUrlParams(urlParamsSchema),
   leaveGroup,
+);
+
+router.get(
+  "/:groupId/transactions",
+  authenticate,
+  validateUrlParams(urlParamsSchema),
+  requireGroupMember,
+  getGroupTransactions,
 );
 
 export default router;

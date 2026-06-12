@@ -35,22 +35,6 @@ export const createGroupInDb = async (
 };
 
 export const getAllUserGroups = async (userId: string) => {
-  const allGroups = await db
-    .select({
-      id: groups.id,
-      name: groups.name,
-      description: groups.description,
-      role: groupMembers.role,
-      joinedAt: groupMembers.createdAt,
-    })
-    .from(groups)
-    .innerJoin(groupMembers, eq(groups.id, groupMembers.groupId))
-    .where(eq(groupMembers.userId, userId));
-
-  return allGroups;
-};
-
-export const getAllUserGroupss = async (userId: string) => {
   const result = await pg`
     SELECT
       g.id,
@@ -265,6 +249,74 @@ export const leaveTheGroup = async (groupId: string, userId: string) => {
     .returning();
 
   return;
+};
+
+export const groupTransactions = async (
+  groupId: string,
+  limit: number = 10,
+  cursor?: string,
+) => {
+  await verifyGroup(groupId);
+
+  const transactions = await pg`
+    SELECT 
+      t.id,
+      t.type,
+      t.status,
+      t.description,
+      t.total_amount AS amount,
+      t.created_at AS created,
+      COALESCE(t.category, 'Uncategorised') as category,
+
+      u_payer.id AS payer_id,
+      u_payer.name AS payer_name,
+
+      u_payee.id AS payee_id,
+      u_payee.name AS payee_name
+    FROM transactions t
+    JOIN "user" u_payer
+      ON u_payer.id = t.payer_id 
+    LEFT JOIN "user" u_payee
+      ON u_payee.id = t.payee_id 
+    WHERE t.group_id = ${groupId}
+      ${cursor ? pg`AND t.created_at < ${cursor}::timestamptz` : pg``}
+    ORDER BY t.created_at DESC
+    LIMIT ${limit + 1}
+  `;
+
+  const hasMore = transactions.length > limit;
+  if (hasMore) transactions.pop();
+
+  const formattedTransactions = transactions.map(
+    ({
+      payer_id,
+      payer_name,
+      payee_id,
+      payee_name,
+      amount,
+      created,
+      ...rest
+    }) => ({
+      ...rest,
+      amount: toDecimal(amount),
+      payer: { id: payer_id, name: payer_name },
+      payee: { id: payee_id, name: payee_name },
+      created: new Date(created).toLocaleDateString(),
+    }),
+  );
+
+  const nextCursor = hasMore
+    ? transactions[transactions.length - 1]?.created
+    : null;
+
+  return {
+    transactions: formattedTransactions,
+    pagination: {
+      hasMore,
+      nextCursor,
+      limit,
+    },
+  };
 };
 
 export const verifyGroup = async (groupId: string) => {
