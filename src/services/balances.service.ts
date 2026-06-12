@@ -17,9 +17,8 @@ const fetchNetBalances = async (groupId: string) => {
     JOIN "user" u ON u.id = le.user_id
     JOIN transactions t ON t.id = le.transaction_id
     WHERE le.group_id = ${groupId}
-      AND (t.type = 'expense' OR t.status = 'confirmed')
+      AND t.status = 'confirmed'
     GROUP BY le.user_id, u.name
-    ORDER BY net_balance DESC
   `;
 };
 
@@ -91,7 +90,7 @@ export const simplifiedBalances = async (groupId: string) => {
 export const userBalancesInGroup = async (groupId: string, userId: string) => {
   const allGroupSettlements = await simplifiedBalances(groupId);
 
-  const iOwe = allGroupSettlements.filter(
+  const whatIOwe = allGroupSettlements.filter(
     (settlement) => settlement.from.id === userId,
   );
 
@@ -100,7 +99,7 @@ export const userBalancesInGroup = async (groupId: string, userId: string) => {
   );
 
   return {
-    iOwe,
+    whatIOwe,
     owedToMe,
   };
 };

@@ -3,7 +3,7 @@ import { z } from "zod";
 export const createExpenseSchema = z
   .object({
     description: z.string().min(1, "Description is required"),
-    category: z.string().optional(),
+    category: z.string(),
     totalAmount: z
       .string()
       .regex(/^\d+(\.\d{1,2})?$/, "Must be a valid amount (e.g., 120.00)"),

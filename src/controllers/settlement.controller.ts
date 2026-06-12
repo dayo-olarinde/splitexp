@@ -1,10 +1,10 @@
 import type { Request, Response } from "express";
 import {
+  confirmSettlement,
   // getSettlementDetail,
   // listGroupSettlements,
   logSettlement,
-  updateTransactionStatus,
-  // updateSettlementStatus,
+  rejectSettlement,
 } from "../services/settlement.service";
 import { ApiResponse } from "../utils/api-response";
 import { asyncHandler } from "../utils/async-handler";
@@ -30,20 +30,29 @@ export const createSettlement = asyncHandler(
 //   },
 // );
 
-export const confirmSettlement = asyncHandler(
+export const confirmUserSettlement = asyncHandler(
   async (req: Request, res: Response) => {
     const userId = req.user!.id;
-    const { groupId, transactionId } = req.params as {
+    const { groupId, settlementId } = req.params as {
       groupId: string;
-      transactionId: string;
+      settlementId: string;
     };
-    const transaction = await updateTransactionStatus(
-      userId,
-      groupId,
-      transactionId,
-    );
+    const settlement = await confirmSettlement(userId, groupId, settlementId);
 
-    res.json(new ApiResponse(200, "Transaction confirmed", transaction));
+    res.json(new ApiResponse(200, "Settlement confirmed", settlement));
+  },
+);
+
+export const rejectPendingSettlement = asyncHandler(
+  async (req: Request, res: Response) => {
+    const userId = req.user!.id;
+    const { groupId, settlementId } = req.params as {
+      groupId: string;
+      settlementId: string;
+    };
+    const settlement = await rejectSettlement(userId, groupId, settlementId);
+
+    res.json(new ApiResponse(200, "Settlement rejected", settlement));
   },
 );
 

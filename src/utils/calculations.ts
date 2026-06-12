@@ -12,19 +12,20 @@ interface CalculatedShare {
   shareAmount: number;
 }
 
-export const toCents = (amount: string): number =>
+export const toKobo = (amount: string): number =>
   Math.round(parseFloat(amount) * 100);
 
-export const toDecimal = (amount: number): string => (amount / 100).toFixed(2);
+export const toDecimal = (amount: number): number =>
+  Number((amount / 100).toFixed(2));
 
 export const validateAndCalcShares = (
   totalAmount: string,
   splitType: "equal" | "percentage" | "exact",
   participants: ParticipantInput[],
 ): CalculatedShare[] => {
-  const totalAmountCents = toCents(totalAmount);
+  const totalAmountKobo = toKobo(totalAmount);
 
-  if (totalAmountCents <= 0) {
+  if (totalAmountKobo <= 0) {
     throw new ApiError(400, "Total amount must be greater than zero");
   }
 
@@ -33,58 +34,58 @@ export const validateAndCalcShares = (
   }
 
   if (splitType === "equal")
-    return calcEqualShares(totalAmountCents, participants);
+    return calcEqualShares(totalAmountKobo, participants);
 
   if (splitType === "exact")
-    return calcExactShares(totalAmountCents, participants);
+    return calcExactShares(totalAmountKobo, participants);
 
   if (splitType === "percentage")
-    return calcPercantageShares(totalAmountCents, participants);
+    return calcPercantageShares(totalAmountKobo, participants);
 
   throw new ApiError(400, "Invalid split type");
 };
 
 const calcEqualShares = (
-  totalAmountCents: number,
+  totalAmountKobo: number,
   participants: ParticipantInput[],
 ) => {
-  const shareCents = Math.floor(totalAmountCents / participants.length);
-  const remaindercents = totalAmountCents - shareCents * participants.length;
+  const shareKobo = Math.floor(totalAmountKobo / participants.length);
+  const remainderKobo = totalAmountKobo - shareKobo * participants.length;
 
   return participants.map((p, i) => ({
     userId: p.userId,
-    shareAmount: shareCents + (i === 0 ? remaindercents : 0),
+    shareAmount: shareKobo + (i === 0 ? remainderKobo : 0),
   }));
 };
 
 const calcExactShares = (
-  totalAmountCents: number,
+  totalAmountKobo: number,
   participants: ParticipantInput[],
 ) => {
-  const shareCents = participants.map((p) => ({
+  const shareKobo = participants.map((p) => ({
     userId: p.userId,
-    shareAmountCents: toCents(p.amount!),
+    shareAmountKobo: toKobo(p.amount!),
   }));
 
-  const allocatedCents = shareCents.reduce(
-    (sum, s) => sum + s.shareAmountCents,
+  const allocatedKobo = shareKobo.reduce(
+    (sum, s) => sum + s.shareAmountKobo,
     0,
   );
 
-  if (allocatedCents !== totalAmountCents)
+  if (allocatedKobo !== totalAmountKobo)
     throw new ApiError(
       400,
-      `Share amounts must equal total. Got ${toDecimal(allocatedCents)}, expected ${toDecimal(totalAmountCents)}`,
+      `Share amounts must equal total. Got ${toDecimal(allocatedKobo)}, expected ${toDecimal(totalAmountKobo)}`,
     );
 
-  return shareCents.map((s) => ({
+  return shareKobo.map((s) => ({
     userId: s.userId,
-    shareAmount: s.shareAmountCents!,
+    shareAmount: s.shareAmountKobo!,
   }));
 };
 
 const calcPercantageShares = (
-  totalAmountCents: number,
+  totalAmountKobo: number,
   participants: ParticipantInput[],
 ) => {
   const totalPercentages = participants.reduce(
@@ -98,20 +99,20 @@ const calcPercantageShares = (
       `Percentages must sum to 100, got ${totalPercentages}`,
     );
 
-  const shareCents = participants.map((p) => ({
+  const shareKobo = participants.map((p) => ({
     userId: p.userId,
-    shareAmountCents: (totalAmountCents * parseFloat(p.percentage!)) / 100,
+    shareAmountKobo: (totalAmountKobo * parseFloat(p.percentage!)) / 100,
   }));
 
-  const allocatedCents = shareCents.reduce(
-    (sum, s) => sum + s.shareAmountCents,
+  const allocatedKobo = shareKobo.reduce(
+    (sum, s) => sum + s.shareAmountKobo,
     0,
   );
 
-  const remainderCents = totalAmountCents - allocatedCents;
+  const remainderKobo = totalAmountKobo - allocatedKobo;
 
-  return shareCents.map((s, i) => ({
+  return shareKobo.map((s, i) => ({
     userId: s.userId,
-    shareAmount: s.shareAmountCents + (i === 0 ? remainderCents : 0),
+    shareAmount: s.shareAmountKobo + (i === 0 ? remainderKobo : 0),
   }));
 };

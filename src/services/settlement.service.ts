@@ -3,7 +3,7 @@ import { db, pg } from "../config/db";
 import { logger } from "../config/logger";
 // import { settlements } from "../db/schema";
 import { ApiError } from "../utils/api-response";
-import { toCents, toDecimal } from "../utils/calculations";
+import { toKobo, toDecimal } from "../utils/calculations";
 import type { CreateSettlementInput } from "../validations/settlement.validation";
 
 export const logSettlement = async (
@@ -14,7 +14,7 @@ export const logSettlement = async (
   if (payerId === data.payeeId)
     throw new ApiError(400, "You cannot settle a debt with yourself");
 
-  const amountCents = toCents(data.amount);
+  const amountKobo = toKobo(data.amount);
 
   const settlement = await pg.begin(async (tx) => {
     const members = await tx`
@@ -56,7 +56,7 @@ export const logSettlement = async (
         'pending',
         ${payerId}, 
         ${data.payeeId}, 
-        ${amountCents}, 
+        ${amountKobo}, 
         ${data.description}
       )
       RETURNING *
@@ -69,13 +69,13 @@ export const logSettlement = async (
         transaction_id: newTx.id,
         group_id: groupId,
         user_id: payerId,
-        amount: amountCents,
+        amount: amountKobo,
       },
       {
         transaction_id: newTx.id,
         group_id: groupId,
         user_id: data.payeeId,
-        amount: -amountCents,
+        amount: -amountKobo,
       },
     ];
 
@@ -110,16 +110,16 @@ export const logSettlement = async (
 //   return allSettlements;
 // };
 
-export const updateTransactionStatus = async (
+export const confirmSettlement = async (
   userId: string,
   groupId: string,
-  transactionId: string,
+  settlementId: string,
 ) => {
   const confirmedTransaction = await pg.begin(async (tx) => {
     const [transaction] = await tx`
     SELECT id, status, type, payee_id
     FROM transactions
-    WHERE id = ${transactionId} 
+    WHERE id = ${settlementId} 
       AND group_id= ${groupId}
     FOR UPDATE
     `;
@@ -148,7 +148,7 @@ export const updateTransactionStatus = async (
     const [updatedTransaction] = await tx`
       UPDATE transactions
       SET status = 'confirmed'
-      WHERE id = ${transactionId}
+      WHERE id = ${settlementId}
       RETURNING *
     `;
 
@@ -156,6 +156,43 @@ export const updateTransactionStatus = async (
   });
 
   return confirmedTransaction;
+};
+
+export const rejectSettlement = async (
+  userId: string,
+  groupId: string,
+  settlementId: string,
+) => {
+  const [transaction] = await pg`
+    SELECT id, status, payee_id, payer_id
+    FROM transactions
+    WHERE id = ${settlementId} 
+      AND group_id= ${groupId}
+      AND type = 'settlement'
+    FOR UPDATE
+    `;
+
+  if (!transaction) throw new ApiError(404, "Pending settlement not found");
+
+  if (transaction.status !== "confirmed")
+    throw new ApiError(
+      400,
+      `You cannot reject a settlement that is already ${transaction.status}`,
+    );
+
+  if (transaction.payee_id !== userId && transaction.payer_id !== userId)
+    throw new ApiError(
+      403,
+      "You are not authorised to confirm this settlement",
+    );
+
+  const [rejectedSettlement] = await pg`
+      DELETE FROM transactions
+      WHERE id = ${settlementId}
+      RETURNING *
+    `;
+
+  return rejectedSettlement;
 };
 
 // export const getSettlementDetail = async (

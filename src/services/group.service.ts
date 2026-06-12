@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db, pg } from "../config/db";
 import { groupMembers, groups, user } from "../db/schema";
 import { ApiError } from "../utils/api-response";
-import { toCents, toDecimal } from "../utils/calculations";
+import { toKobo, toDecimal } from "../utils/calculations";
 import type { UpdateGroupSchema } from "../validations/group.validation";
 
 export const createGroupInDb = async (

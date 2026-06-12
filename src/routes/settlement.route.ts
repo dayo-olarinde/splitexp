@@ -1,6 +1,6 @@
 import { Router } from "express";
 import {
-  confirmSettlement,
+  confirmUserSettlement,
   createSettlement,
   // getSettlement,
   // listSettlements,
@@ -36,11 +36,11 @@ router.post(
 // );
 
 router.patch(
-  "/settlements/:transactionId/confirm",
+  "/settlements/:settlementId/confirm",
   authenticate,
   validateUrlParams(urlParamsSchema),
   requireGroupMember,
-  confirmSettlement,
+  confirmUserSettlement,
 );
 
 // router.get(

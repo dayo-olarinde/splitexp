@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db, pg } from "../config/db";
 import { ApiError } from "../utils/api-response";
 import {
-  toCents,
+  toKobo,
   toDecimal,
   validateAndCalcShares,
 } from "../utils/calculations";
@@ -37,18 +37,19 @@ export const logExpense = async (groupId: string, data: CreateExpenseInput) => {
     data.participants,
   );
 
-  const totalAmountCents = toCents(data.totalAmount);
+  const totalAmountKobo = toKobo(data.totalAmount);
 
   const transaction = await pg.begin(async (tx) => {
     const [newTx] = await tx`
-      INSERT INTO transactions (group_id, type, split_type, payer_id, total_amount, description)
+      INSERT INTO transactions (group_id, type, split_type, payer_id, total_amount, description, category)
       VALUES (
         ${groupId},
         'expense',
         ${data.splitType},
         ${data.payerId},
-        ${toCents(data.totalAmount)},
-        ${data.description}
+        ${toKobo(data.totalAmount)},
+        ${data.description},
+        ${data.category}
       )
       RETURNING *
       `;
@@ -60,7 +61,7 @@ export const logExpense = async (groupId: string, data: CreateExpenseInput) => {
         transaction_id: newTx.id,
         group_id: groupId,
         user_id: data.payerId,
-        amount: totalAmountCents,
+        amount: totalAmountKobo,
       },
     ];
 
