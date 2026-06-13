@@ -7,7 +7,13 @@ declare global {
     interface Request {
       user?: import("better-auth").User;
       session?: import("better-auth").Session;
-      member?: InferSelectModel<typeof groupMembers>;
+      member?: {
+        id: string;
+        user_id: string;
+        group_id: string;
+        role: "admin" | "member";
+        created_at: string;
+      };
     }
   }
 }

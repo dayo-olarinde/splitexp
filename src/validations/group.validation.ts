@@ -20,4 +20,5 @@ export const updateGroupSchema = z.object({
   description: z.string().max(255).optional(),
 });
 
+export type CreateGroupInput = z.infer<typeof createGroupSchema>;
 export type UpdateGroupSchema = z.infer<typeof updateGroupSchema>;

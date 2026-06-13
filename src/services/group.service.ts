@@ -1,53 +1,47 @@
 import { and, eq } from "drizzle-orm";
 import { db, pg } from "../config/db";
-import { groupMembers, groups, user } from "../db/schema";
+import { groupMembers } from "../db/schema";
 import { ApiError } from "../utils/api-response";
-import { toKobo, toDecimal } from "../utils/calculations";
-import type { UpdateGroupSchema } from "../validations/group.validation";
+import { toDecimal } from "../utils/calculations";
+import type {
+  CreateGroupInput,
+  UpdateGroupSchema,
+} from "../validations/group.validation";
 
 export const createGroupInDb = async (
   userId: string,
-  name: string,
-  description?: string,
+  data: CreateGroupInput,
 ) => {
-  const newGroup = await db.transaction(async (tx) => {
-    const [group] = await tx
-      .insert(groups)
-      .values({
-        name,
-        description,
-        createdBy: userId,
-      })
-      .returning();
+  const { name, description } = data;
 
-    if (!group) throw new ApiError(500, "Failed to create group");
+  const group = await pg.begin(async (tx) => {
+    const [newGroup] = await tx`
+      INSERT INTO groups (name, description, created_by)
+      VALUES ( ${name}, ${description ?? ""}, ${userId} )
+      RETURNING *
+    `;
+    if (!newGroup) throw new ApiError(500, "Failed to create group");
 
-    await tx.insert(groupMembers).values({
-      groupId: group.id,
-      userId: userId,
-      role: "admin",
-    });
+    await tx`
+    INSERT INTO group_members (group_id, user_id, role)
+    VALUES (${newGroup.id}, ${userId}, 'admin')
+    `;
 
-    return group;
+    return newGroup;
   });
 
-  return newGroup;
+  return group;
 };
 
 export const getAllUserGroups = async (userId: string) => {
   const result = await pg`
-    SELECT
-      g.id,
-      g.name,
-      g.description,
-      gm.role,
-      gm.created_at AS joined_at,
-      COUNT(all_members.user_id) AS member_count
+    SELECT g.id, g.name, g.description, gm.role, gm.created_at AS joined_at,
+      COUNT(agm.user_id)::int AS member_count
     FROM groups g
     INNER JOIN group_members gm
       ON g.id = gm.group_id AND gm.user_id = ${userId}
-    LEFT JOIN group_members all_members
-      ON g.id = all_members.group_id
+    LEFT JOIN group_members agm
+      ON agm.group_id = g.id
     GROUP BY g.id, g.name, g.description, gm.role, gm.created_at
     ORDER BY gm.created_at DESC
   `;
@@ -56,22 +50,45 @@ export const getAllUserGroups = async (userId: string) => {
 };
 
 export const getGroupDetails = async (groupId: string) => {
-  const group = await verifyGroup(groupId);
-
-  const members = await pg`
-    SELECT
-      gm.user_id,
-      gm.role,
+  const rows = await pg`
+    SELECT 
+      g.id, 
+      g.name AS group_name, 
+      g.description, 
+      g.created_by, 
+      
+      gm.user_id, 
+      gm.role, 
       gm.created_at AS joined_at,
-      u.name,
+
+           
+      u.name AS user_name,
       u.email
-    FROM group_members gm
-    INNER JOIN "user" u 
-      ON gm.user_id = u.id
-    WHERE gm.group_id = ${groupId}
+    FROM groups g
+    JOIN group_members gm
+      ON gm.group_id = g.id
+    JOIN "user" u 
+      ON u.id = gm.user_id
+    WHERE g.id = ${groupId}
     `;
 
-  return { ...group, members: members };
+  if (rows.length === 0) throw new ApiError(404, "Group does not exist");
+
+  const formattedResponse = {
+    groupId: rows[0]?.id,
+    name: rows[0]?.group_name,
+    description: rows[0]?.description,
+    createdBy: rows[0]?.created_by,
+    members: rows.map((r) => ({
+      id: r.user_id,
+      name: r.user_name,
+      email: r.email,
+      role: r.role,
+      joinedAt: r.joined_at,
+    })),
+  };
+
+  return formattedResponse;
 };
 
 export const updateGroupDetails = async (
@@ -79,28 +96,35 @@ export const updateGroupDetails = async (
   data: UpdateGroupSchema,
 ) => {
   await verifyGroup(groupId);
+  const { name, description } = data;
 
-  const [updatedGroup] = await db
-    .update(groups)
-    .set({
-      ...(data.name && { name: data.name }),
-      ...(data.description && { description: data.description }),
-    })
-    .where(eq(groups.id, groupId))
-    .returning();
+  const updateData: Record<string, string> = {};
+  if (name !== undefined) updateData.name = name;
+  if (description !== undefined) updateData.description = description;
+
+  if (Object.keys(updateData).length === 0)
+    throw new ApiError(400, "No fields to update");
+
+  const [updatedGroup] = await pg`
+    UPDATE groups
+    SET ${pg(updateData)}
+    WHERE id = ${groupId}
+    RETURNING *
+  `;
 
   if (!updatedGroup) throw new ApiError(500, "Failed to update group");
 
   return updatedGroup;
 };
 
-export const deleteGroupById = async (groupId: string) => {
+export const deleteGroup = async (groupId: string) => {
   await verifyGroup(groupId);
 
-  const [deletedGroup] = await db
-    .delete(groups)
-    .where(eq(groups.id, groupId))
-    .returning();
+  const [deletedGroup] = await pg`
+    DELETE FROM groups
+    WHERE id = ${groupId}
+    RETURNING *
+  `;
 
   if (!deletedGroup) throw new ApiError(500, "Failed to delete group");
 
@@ -108,63 +132,51 @@ export const deleteGroupById = async (groupId: string) => {
 };
 
 export const addNewMember = async (groupId: string, email: string) => {
-  const [existingUser] = await db
-    .select({ id: user.id })
-    .from(user)
-    .where(eq(user.email, email))
-    .limit(1);
+  const [user] = await pg`
+    SELECT id
+    FROM "user"
+    WHERE email = ${email}
+  `;
 
-  if (!existingUser)
+  if (!user)
     throw new ApiError(404, "No account found with that email address");
 
   await verifyGroup(groupId);
 
-  const [existingMember] = await db
-    .select({ id: groupMembers.id })
-    .from(groupMembers)
-    .where(
-      and(
-        eq(groupMembers.userId, existingUser.id),
-        eq(groupMembers.groupId, groupId),
-      ),
-    )
-    .limit(1);
+  const [existingMember] = await pg`
+    SELECT id
+    FROM group_members
+    WHERE user_id = ${user.id}
+      AND group_id = ${groupId}
+  `;
 
   if (existingMember)
     throw new ApiError(409, "This user is already a member of this group");
 
-  const [newMember] = await db
-    .insert(groupMembers)
-    .values({
-      groupId,
-      userId: existingUser.id,
-      role: "member",
-    })
-    .returning();
+  const [newMember] = await pg`
+    INSERT INTO group_members (group_id, user_id, role)
+    VALUES (${groupId},${user.id}, 'member')
+    RETURNING *
+  `;
 
   if (!newMember) throw new ApiError(500, "Failed to add member");
 
   return newMember;
 };
 
-export const removeMemberById = async (
-  groupId: string,
-  targetUserId: string,
-) => {
+export const removeMemberById = async (groupId: string, targetId: string) => {
   const group = await verifyGroup(groupId);
 
-  if (group.createdBy === targetUserId) {
+  if (group.createdBy === targetId) {
     throw new ApiError(403, "The group creator cannot be removed");
   }
-  const [removedMember] = await db
-    .delete(groupMembers)
-    .where(
-      and(
-        eq(groupMembers.userId, targetUserId),
-        eq(groupMembers.groupId, groupId),
-      ),
-    )
-    .returning();
+
+  const [removedMember] = await pg`
+    DELETE FROM group_members
+    WHERE user_id = ${targetId}
+      AND group_id = ${groupId}
+    RETURNING *
+  `;
 
   if (!removedMember) throw new ApiError(404, "Member not found in this group");
 
@@ -189,32 +201,26 @@ export const changeMemberRole = async (
     )
     .returning();
 
-  if (!updatedMember) throw new ApiError(500, "Failed to remove member");
+  if (!updatedMember) throw new ApiError(500, "Failed to update member role");
 
   return updatedMember;
 };
 
-export const leaveTheGroup = async (groupId: string, userId: string) => {
-  await verifyGroup(groupId);
-
-  const [member] = await db
-    .select()
-    .from(groupMembers)
-    .where(
-      and(eq(groupMembers.userId, userId), eq(groupMembers.groupId, groupId)),
-    );
-
-  if (!member) throw new ApiError(404, "You are not a member of this group");
-
-  if (member?.role === "admin") {
-    const adminCount = await pg`
+export const leaveTheGroup = async (
+  groupId: string,
+  userId: string,
+  role: "admin" | "member",
+) => {
+  if (role === "admin") {
+    const [adminCount] = await pg`
       SELECT
         COALESCE(COUNT(gm.id), 0) AS count
       FROM group_members gm
-      WHERE gm.group_id = ${groupId} AND gm.role = 'admin'
+      WHERE gm.group_id = ${groupId} 
+        AND gm.role = 'admin'
       `;
 
-    if (Number(adminCount[0]?.count) <= 1) {
+    if (Number(adminCount?.count) <= 1) {
       throw new ApiError(
         400,
         "You are the last admin. Promote another member or delete the group.",
@@ -237,16 +243,15 @@ export const leaveTheGroup = async (groupId: string, userId: string) => {
   if (netBalance !== 0) {
     throw new ApiError(
       400,
-      `Cannot leave the group. You have an outstanding balance of ${toDecimal(Math.abs(netBalance))}. Please settle all debts first.`,
+      `Cannot leave the group. You have an outstanding balance of ${toDecimal(Math.abs(netBalance))}.`,
     );
   }
 
-  await db
-    .delete(groupMembers)
-    .where(
-      and(eq(groupMembers.userId, userId), eq(groupMembers.groupId, groupId)),
-    )
-    .returning();
+  await pg`
+    DELETE FROM group_members
+    WHERE user_id = ${userId}
+      AND group_id = ${groupId}
+  `;
 
   return;
 };
@@ -320,18 +325,13 @@ export const groupTransactions = async (
 };
 
 export const verifyGroup = async (groupId: string) => {
-  const [group] = await db
-    .select({
-      id: groups.id,
-      name: groups.name,
-      description: groups.description,
-      createdBy: groups.createdBy,
-    })
-    .from(groups)
-    .where(eq(groups.id, groupId))
-    .limit(1);
+  const [group] = await pg`
+    SELECT id, name, description, created_by
+    FROM groups
+    WHERE id = ${groupId}
+  `;
 
   if (!group) throw new ApiError(404, "Group does not exist");
 
-  return group;
+  return { ...group, createdBy: group.created_by };
 };

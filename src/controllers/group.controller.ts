@@ -3,7 +3,7 @@ import {
   addNewMember,
   changeMemberRole,
   createGroupInDb,
-  deleteGroupById,
+  deleteGroup,
   getAllUserGroups,
   getGroupDetails,
   groupTransactions,
@@ -16,9 +16,8 @@ import { asyncHandler } from "../utils/async-handler";
 
 export const createGroup = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.id;
-  const { name, description } = req.body;
 
-  const group = await createGroupInDb(userId, name, description);
+  const group = await createGroupInDb(userId, req.body);
 
   res
     .status(201)
@@ -51,13 +50,15 @@ export const updateGroup = asyncHandler(async (req: Request, res: Response) => {
   res.json(new ApiResponse(200, "Group updated successfully", updatedGroup));
 });
 
-export const deleteGroup = asyncHandler(async (req: Request, res: Response) => {
-  const { groupId } = req.params as { groupId: string };
+export const deleteGroupById = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { groupId } = req.params as { groupId: string };
 
-  await deleteGroupById(groupId);
+    await deleteGroup(groupId);
 
-  res.json(new ApiResponse(204, "Group deleted successfully"));
-});
+    res.json(new ApiResponse(200, "Group deleted successfully"));
+  },
+);
 
 export const addMember = asyncHandler(async (req: Request, res: Response) => {
   const { groupId } = req.params as { groupId: string };
@@ -102,8 +103,9 @@ export const changeRole = asyncHandler(async (req: Request, res: Response) => {
 export const leaveGroup = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const { groupId } = req.params as { groupId: string };
+  const role = req.member!.role;
 
-  await leaveTheGroup(groupId, userId);
+  await leaveTheGroup(groupId, userId, role);
 
   res.json(new ApiResponse(200, "Left group successfully"));
 });

@@ -3,7 +3,7 @@ import {
   addMember,
   changeRole,
   createGroup,
-  deleteGroup,
+  deleteGroupById,
   getGroupById,
   getGroups,
   getGroupTransactions,
@@ -45,6 +45,7 @@ router.get(
   "/:groupId",
   authenticate,
   validateUrlParams(urlParamsSchema),
+  requireGroupMember,
   getGroupById,
 );
 
@@ -52,6 +53,7 @@ router.patch(
   "/:groupId",
   authenticate,
   validateUrlParams(urlParamsSchema),
+  requireGroupMember,
   requireGroupAdmin,
   validateInput(updateGroupSchema),
   updateGroup,
@@ -61,14 +63,16 @@ router.delete(
   "/:groupId",
   authenticate,
   validateUrlParams(urlParamsSchema),
+  requireGroupMember,
   requireGroupAdmin,
-  deleteGroup,
+  deleteGroupById,
 );
 
 router.post(
   "/:groupId/members/",
   authenticate,
   validateUrlParams(urlParamsSchema),
+  requireGroupMember,
   requireGroupAdmin,
   validateInput(addMemberToGroup),
   addMember,
@@ -78,6 +82,7 @@ router.delete(
   "/:groupId/members/:userId",
   authenticate,
   validateUrlParams(urlParamsSchema),
+  requireGroupMember,
   requireGroupAdmin,
   removeMember,
 );
@@ -86,6 +91,7 @@ router.patch(
   "/:groupId/members/:userId",
   authenticate,
   validateUrlParams(urlParamsSchema),
+  requireGroupMember,
   requireGroupAdmin,
   validateInput(changeRoleSchema),
   changeRole,
@@ -95,6 +101,7 @@ router.post(
   "/:groupId/leave",
   authenticate,
   validateUrlParams(urlParamsSchema),
+  requireGroupMember,
   leaveGroup,
 );
 
