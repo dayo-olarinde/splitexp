@@ -1,5 +1,10 @@
 import { Router } from "express";
-import { createExpense } from "../controllers/expense.controller";
+import {
+  createExpense,
+  deleteExpenseById,
+  getExpenseDetails,
+  listGroupExpenses,
+} from "../controllers/expense.controller";
 import {
   authenticate,
   requireGroupMember,
@@ -18,34 +23,34 @@ router.post(
   "/expenses",
   authenticate,
   financialTransactionLimiter,
-  requireGroupMember,
   validateUrlParams(urlParamsSchema),
+  requireGroupMember,
   validateInput(createExpenseSchema),
   createExpense,
 );
 
-// router.get(
-//   "/expenses",
-//   authenticate,
-//   validateUrlParams(urlParamsSchema),
-//   requireGroupMember,
-//   listExpenses,
-// );
+router.get(
+  "/expenses",
+  authenticate,
+  validateUrlParams(urlParamsSchema),
+  requireGroupMember,
+  listGroupExpenses,
+);
 
-// router.get(
-//   "/expenses/:expenseId",
-//   authenticate,
-//   validateUrlParams(urlParamsSchema),
-//   requireGroupMember,
-//   getExpense,
-// );
+router.get(
+  "/expenses/:expenseId",
+  authenticate,
+  validateUrlParams(urlParamsSchema),
+  requireGroupMember,
+  getExpenseDetails,
+);
 
-// router.delete(
-//   "/expenses/:expenseId",
-//   authenticate,
-//   validateUrlParams(urlParamsSchema),
-//   requireGroupMember,
-//   deleteExpense,
-// );
+router.delete(
+  "/expenses/:expenseId",
+  authenticate,
+  validateUrlParams(urlParamsSchema),
+  requireGroupMember,
+  deleteExpenseById,
+);
 
 export default router;
