@@ -13,7 +13,7 @@ export const transactions = pgTable("transactions", {
     .notNull(),
   splitType: text("split_type", { enum: ["equal", "percentage", "exact"] }),
   description: text("description").notNull(),
-  category: text("category").notNull(),
+  category: text("category"),
   totalAmount: integer("total_amount"),
   payerId: text("payer_id").references(() => user.id),
   payeeId: text("payee_id").references(() => user.id),

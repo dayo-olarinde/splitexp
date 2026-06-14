@@ -17,6 +17,10 @@ export const transactionsRelations = relations(
       fields: [transactions.payerId],
       references: [user.id],
     }),
+    payee: one(user, {
+      fields: [transactions.payeeId],
+      references: [user.id],
+    }),
     shares: many(ledgerEntries),
   }),
 );

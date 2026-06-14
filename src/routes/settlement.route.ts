@@ -2,8 +2,9 @@ import { Router } from "express";
 import {
   confirmUserSettlement,
   createSettlement,
-  // getSettlement,
-  // listSettlements,
+  getGroupSettlements,
+  getSettlementDetails,
+  rejectPendingSettlement,
 } from "../controllers/settlement.controller";
 import {
   authenticate,
@@ -27,13 +28,13 @@ router.post(
   createSettlement,
 );
 
-// router.get(
-//   "/settlements",
-//   authenticate,
-//   validateUrlParams(urlParamsSchema),
-//   requireGroupMember,
-//   listSettlements,
-// );
+router.get(
+  "/settlements",
+  authenticate,
+  validateUrlParams(urlParamsSchema),
+  requireGroupMember,
+  getGroupSettlements,
+);
 
 router.patch(
   "/settlements/:settlementId/confirm",
@@ -43,12 +44,20 @@ router.patch(
   confirmUserSettlement,
 );
 
-// router.get(
-//   "/settlements/:settlementId",
-//   authenticate,
-//   validateUrlParams(urlParamsSchema),
-//   requireGroupMember,
-//   getSettlement,
-// );
+router.delete(
+  "/settlements/:settlementId/reject",
+  authenticate,
+  validateUrlParams(urlParamsSchema),
+  requireGroupMember,
+  rejectPendingSettlement,
+);
+
+router.get(
+  "/settlements/:settlementId",
+  authenticate,
+  validateUrlParams(urlParamsSchema),
+  requireGroupMember,
+  getSettlementDetails,
+);
 
 export default router;

@@ -1,10 +1,10 @@
 import type { Request, Response } from "express";
 import {
   confirmSettlement,
-  // getSettlementDetail,
-  // listGroupSettlements,
   logSettlement,
   rejectSettlement,
+  fetchGroupSettlements,
+  settlementDetail,
 } from "../services/settlement.service";
 import { ApiResponse } from "../utils/api-response";
 import { asyncHandler } from "../utils/async-handler";
@@ -21,14 +21,14 @@ export const createSettlement = asyncHandler(
   },
 );
 
-// export const listSettlements = asyncHandler(
-//   async (req: Request, res: Response) => {
-//     const { groupId } = req.params as { groupId: string };
-//     const settlements = await listGroupSettlements(groupId);
+export const getGroupSettlements = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { groupId } = req.params as { groupId: string };
+    const settlements = await fetchGroupSettlements(groupId);
 
-//     res.json(new ApiResponse(200, "Settlements retrieved", settlements));
-//   },
-// );
+    res.json(new ApiResponse(200, "Settlements retrieved", settlements));
+  },
+);
 
 export const confirmUserSettlement = asyncHandler(
   async (req: Request, res: Response) => {
@@ -56,15 +56,15 @@ export const rejectPendingSettlement = asyncHandler(
   },
 );
 
-// export const getSettlement = asyncHandler(
-//   async (req: Request, res: Response) => {
-//     const userId = req.user!.id;
-//     const { groupId, settlementId } = req.params as {
-//       groupId: string;
-//       settlementId: string;
-//     };
-//     const settlement = await getSettlementDetail(userId, groupId, settlementId);
+export const getSettlementDetails = asyncHandler(
+  async (req: Request, res: Response) => {
+    const userId = req.user!.id;
+    const { groupId, settlementId } = req.params as {
+      groupId: string;
+      settlementId: string;
+    };
+    const settlement = await settlementDetail(userId, groupId, settlementId);
 
-//     res.json(new ApiResponse(200, "Settlement details retrieved", settlement));
-//   },
-// );
+    res.json(new ApiResponse(200, "Settlement details retrieved", settlement));
+  },
+);

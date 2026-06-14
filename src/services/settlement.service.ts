@@ -1,9 +1,8 @@
-// import { and, desc, eq, or } from "drizzle-orm";
+import { and, desc, eq, or } from "drizzle-orm";
 import { db, pg } from "../config/db";
-import { logger } from "../config/logger";
-// import { settlements } from "../db/schema";
+import { transactions } from "../db/schema";
 import { ApiError } from "../utils/api-response";
-import { toKobo, toDecimal } from "../utils/calculations";
+import { toDecimal, toKobo } from "../utils/calculations";
 import type { CreateSettlementInput } from "../validations/settlement.validation";
 
 export const logSettlement = async (
@@ -59,7 +58,8 @@ export const logSettlement = async (
         ${amountKobo}, 
         ${data.description}
       )
-      RETURNING *
+      RETURNING id, group_id, type, status, description, total_amount, 
+        payer_id, payee_id
       `;
 
     if (!newTx) throw new ApiError(500, "Error creating new Transaction");
@@ -90,25 +90,38 @@ export const logSettlement = async (
     return newTx;
   });
 
-  return settlement;
+  return { ...settlement, total_amount: toDecimal(settlement.total_amount) };
 };
 
-// export const listGroupSettlements = async (groupId: string) => {
-//   const allSettlements = await db.query.settlements.findMany({
-//     where: eq(settlements?.groupId, groupId),
-//     orderBy: [desc(settlements.createdAt)],
-//     with: {
-//       payer: {
-//         columns: { id: true, name: true, email: true },
-//       },
-//       payee: {
-//         columns: { id: true, name: true, email: true },
-//       },
-//     },
-//   });
+export const fetchGroupSettlements = async (groupId: string) => {
+  const allSettlements = await db.query.transactions.findMany({
+    where: and(
+      eq(transactions?.groupId, groupId),
+      eq(transactions?.type, "settlement"),
+    ),
+    columns: {
+      id: true,
+      status: true,
+      description: true,
+      totalAmount: true,
+      createdAt: true,
+    },
+    orderBy: [desc(transactions.createdAt)],
+    with: {
+      payer: {
+        columns: { id: true, name: true, email: true },
+      },
+      payee: {
+        columns: { id: true, name: true, email: true },
+      },
+    },
+  });
 
-//   return allSettlements;
-// };
+  return allSettlements.map((s) => ({
+    ...s,
+    totalAmount: toDecimal(s.totalAmount ?? 0),
+  }));
+};
 
 export const confirmSettlement = async (
   userId: string,
@@ -117,21 +130,15 @@ export const confirmSettlement = async (
 ) => {
   const confirmedTransaction = await pg.begin(async (tx) => {
     const [transaction] = await tx`
-    SELECT id, status, type, payee_id
+    SELECT id, status, payee_id
     FROM transactions
     WHERE id = ${settlementId} 
       AND group_id= ${groupId}
+      AND type = 'settlement'
     FOR UPDATE
     `;
 
     if (!transaction) throw new ApiError(404, "Settlement not found");
-
-    if (transaction.type !== "settlement") {
-      throw new ApiError(
-        400,
-        "This transaction type cannot be confirmed manually",
-      );
-    }
 
     if (transaction.status !== "pending")
       throw new ApiError(
@@ -149,10 +156,14 @@ export const confirmSettlement = async (
       UPDATE transactions
       SET status = 'confirmed'
       WHERE id = ${settlementId}
-      RETURNING *
+      RETURNING id, group_id, type, status, description, total_amount, 
+        payer_id, payee_id
     `;
 
-    return updatedTransaction;
+    return {
+      ...updatedTransaction,
+      total_amount: toDecimal(updatedTransaction?.total_amount),
+    };
   });
 
   return confirmedTransaction;
@@ -163,65 +174,80 @@ export const rejectSettlement = async (
   groupId: string,
   settlementId: string,
 ) => {
-  const [transaction] = await pg`
+  return await pg.begin(async (tx) => {
+    const [transaction] = await tx`
     SELECT id, status, payee_id, payer_id
     FROM transactions
     WHERE id = ${settlementId} 
       AND group_id= ${groupId}
       AND type = 'settlement'
+      AND status = 'pending'
     FOR UPDATE
     `;
 
-  if (!transaction) throw new ApiError(404, "Pending settlement not found");
+    if (!transaction) throw new ApiError(404, "Pending settlement not found");
 
-  if (transaction.status !== "confirmed")
-    throw new ApiError(
-      400,
-      `You cannot reject a settlement that is already ${transaction.status}`,
-    );
+    if (transaction.status !== "pending")
+      throw new ApiError(
+        400,
+        `You cannot reject a settlement that is already ${transaction.status}`,
+      );
 
-  if (transaction.payee_id !== userId && transaction.payer_id !== userId)
-    throw new ApiError(
-      403,
-      "You are not authorised to confirm this settlement",
-    );
+    if (transaction.payee_id !== userId && transaction.payer_id !== userId)
+      throw new ApiError(
+        403,
+        "You are not authorised to confirm this settlement",
+      );
 
-  const [rejectedSettlement] = await pg`
+    const [rejectedSettlement] = await tx`
       DELETE FROM transactions
       WHERE id = ${settlementId}
       RETURNING *
     `;
 
-  return rejectedSettlement;
+    return rejectedSettlement;
+  });
 };
 
-// export const getSettlementDetail = async (
-//   userId: string,
-//   groupId: string,
-//   settlementId: string,
-// ) => {
-//   const settlement = await db.query.settlements.findFirst({
-//     where: and(
-//       eq(settlements.groupId, groupId),
-//       eq(settlements.id, settlementId),
-//       or(eq(settlements.payerId, userId), eq(settlements.payeeId, userId)),
-//     ),
-//     with: {
-//       payer: {
-//         columns: { id: true, name: true, email: true },
-//       },
-//       payee: {
-//         columns: { id: true, name: true, email: true },
-//       },
-//     },
-//   });
+export const settlementDetail = async (
+  userId: string,
+  groupId: string,
+  settlementId: string,
+) => {
+  const settlement = await db.query.transactions.findFirst({
+    where: and(
+      eq(transactions.groupId, groupId),
+      eq(transactions.id, settlementId),
+      or(eq(transactions.payerId, userId), eq(transactions.payeeId, userId)),
+    ),
+    columns: {
+      id: true,
+      groupId: true,
+      type: true,
+      status: true,
+      description: true,
+      totalAmount: true,
+      createdAt: true,
+    },
+    with: {
+      payer: {
+        columns: { id: true, name: true, email: true },
+      },
+      payee: {
+        columns: { id: true, name: true, email: true },
+      },
+    },
+  });
 
-//   if (!settlement) {
-//     throw new ApiError(
-//       404,
-//       "Settlement not found or you are not authorized to view it",
-//     );
-//   }
+  if (!settlement) {
+    throw new ApiError(
+      404,
+      "Settlement not found or you are not authorized to view it",
+    );
+  }
 
-//   return settlement;
-// };
+  return {
+    ...settlement,
+    totalAmount: toDecimal(settlement.totalAmount ?? 0),
+  };
+};
