@@ -1,0 +1,1 @@
+CREATE INDEX "expenses_group_created_idx" ON "transactions" USING btree ("group_id","type");

@@ -207,7 +207,7 @@ export const personalMonthlyBreakdown = async (userId: string) => {
     WITH monthly_trend as (
       SELECT 
         DATE_TRUNC('month', t.created_at) AS month,
-        ABS(SUM(le.amount)):int AS total_spent
+        ABS(SUM(le.amount))::int AS total_spent
       FROM ledger_entries le
       JOIN transactions t
         ON t.id = le.transaction_id

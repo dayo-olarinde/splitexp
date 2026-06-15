@@ -36,6 +36,13 @@
       "when": 1781437745599,
       "tag": "0004_flippant_bastion",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1781480585672,
+      "tag": "0005_slimy_thundra",
+      "breakpoints": true
     }
   ]
 }

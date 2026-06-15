@@ -207,8 +207,8 @@ export const deleteExpense = async (
     DELETE FROM transactions
     WHERE id = ${transactionId}
       AND group_id = ${groupId}
-      AND type = 'expense
-    RETURNING *
+      AND type = 'expense'
+    RETURNING id, category, description, total_amount
   `;
 
   return deletedExpense;
