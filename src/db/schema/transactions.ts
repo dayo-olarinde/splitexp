@@ -30,5 +30,5 @@ export const transactions = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (t) => [index("expenses_group_created_idx").on(t.groupId, t.type)],
+  (t) => [index("transaction_group_idx").on(t.groupId, t.type)],
 );
