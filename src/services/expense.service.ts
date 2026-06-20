@@ -18,7 +18,7 @@ export const logExpense = async (groupId: string, data: CreateExpenseInput) => {
     SELECT user_id
     FROM group_members
     WHERE group_id = ${groupId}
-      AND user_id = ANY(${uniqueUserIds}::ltext[])
+      AND user_id = ANY(${uniqueUserIds}::text[])
   `;
 
   const validIdsSet = new Set(memberRows.map((row) => row.user_id));
