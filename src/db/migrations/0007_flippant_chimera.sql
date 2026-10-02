@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "uniq_pending_settlement" ON "transactions" USING btree ("group_id","payer_id","payee_id") WHERE "transactions"."type" = 'settlement' AND "transactions"."status" = 'pending';

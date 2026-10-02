@@ -21,7 +21,7 @@ export const logSettlement = async (
       FROM group_members
       WHERE group_id = ${groupId}
         AND user_id IN (${data.payeeId}, ${payerId})
-      FOR UPDATE
+      FOR SHARE
       `;
 
     if (members.length !== 2)
@@ -30,24 +30,7 @@ export const logSettlement = async (
         "Both payer and payee must be members of this group",
       );
 
-    const [pendingSettlement] = await tx`
-      SELECT id
-      FROM transactions 
-      WHERE group_id = ${groupId}
-        AND type = 'settlement'
-        AND status = 'pending'
-        AND payer_id = ${payerId}
-        AND payee_id = ${data.payeeId}
-      LIMIT 1
-      `;
-
-    if (pendingSettlement)
-      throw new ApiError(
-        400,
-        "You already have a pending settlement with this user. Wait for them to confirm it.",
-      );
-
-    const [newTx] = await tx`
+    const [insertedTransaction] = await tx`
       INSERT INTO transactions (group_id, type, status, payer_id, payee_id, total_amount, description)
       VALUES (
         ${groupId}, 
@@ -58,21 +41,28 @@ export const logSettlement = async (
         ${amountKobo}, 
         ${data.description}
       )
+      ON CONFLICT (group_id, payer_id, payee_id)
+        WHERE type = 'settlement' AND status = 'pending'
+      DO NOTHING
       RETURNING id, group_id, type, status, description, total_amount, 
         payer_id, payee_id
       `;
 
-    if (!newTx) throw new ApiError(500, "Error creating new Transaction");
+    if (!insertedTransaction)
+      throw new ApiError(
+        409,
+        "You already have a pending settlement with this user. Wait for them to confirm it.",
+      );
 
     const ledgerEntry = [
       {
-        transaction_id: newTx.id,
+        transaction_id: insertedTransaction.id,
         group_id: groupId,
         user_id: payerId,
         amount: amountKobo,
       },
       {
-        transaction_id: newTx.id,
+        transaction_id: insertedTransaction.id,
         group_id: groupId,
         user_id: data.payeeId,
         amount: -amountKobo,
@@ -87,7 +77,7 @@ export const logSettlement = async (
     if (netSum !== 0)
       throw new ApiError(500, "Ledger imbalance. Settlement aborted");
 
-    return newTx;
+    return insertedTransaction;
   });
 
   return { ...settlement, total_amount: toDecimal(settlement.total_amount) };

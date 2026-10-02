@@ -4,8 +4,10 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { user } from "./auth";
 import { groups } from "./groups";
 
@@ -30,5 +32,11 @@ export const transactions = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (t) => [index("transaction_group_idx").on(t.groupId, t.type)],
+  (t) => [
+    index("transaction_group_idx").on(t.groupId, t.type),
+    uniqueIndex("uniq_pending_settlement")
+      .on(t.groupId, t.payerId, t.payeeId)
+      .where(sql`${t.type} = 'settlement' AND ${t.status} = 'pending'`),
+  ],
+
 );
